@@ -118,7 +118,7 @@ public:
     assert(!isinf(value));
     assert(!isnan(value));
     // FIXME: use condi
-    if (value < 1e-12 && value > -1e-12) {
+    if (fabs(value) < 1e-12) {
       elements_.erase(coord);
       return;
     }
@@ -252,7 +252,7 @@ template <rank_t rank1, rank_t rank2, class Value> class ContractedTensor
                                                           &*i2));
   }
   void Go(Tensor<rank1 + rank2 - 1, Value> *t_out) {
-    
+
 };
 */
 

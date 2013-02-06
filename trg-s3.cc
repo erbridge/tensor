@@ -211,11 +211,10 @@ uint8_t CondenseSVInd(const uint8_t rho_1, const uint8_t rho_2) {
   return ind;
 }
 
-void DoFirstSVD(DTensor5 result[2], uint8_t sv_len[3][3], DTensor4 *B,
-                const uint8_t dc, const double condi,
-                const uint8_t msize[3][3]) {
-  //FIXME: keep all svs equal to the smallest and adjust the dc
-  uint8_t sv_list[9*dc][3];
+uint8_t DoFirstSVD(DTensor5 result[2], uint8_t sv_len[3][3], DTensor4 *B,
+                   uint8_t dc, const double condi, const uint8_t msize[3][3]) {
+  // number of rows for sv_list is exaggerated to be safe
+  uint8_t sv_list[18*dc][3];
   uint8_t sv_num = 0;
   gsl_matrix *U[3][3];
   gsl_matrix *V[3][3];
@@ -271,20 +270,47 @@ void DoFirstSVD(DTensor5 result[2], uint8_t sv_len[3][3], DTensor4 *B,
     }
   }
 
+  if (sv_num > dc) {
+    uint8_t dc_inc = 0;
+    uint8_t n = dc;
+    while (fabs(sv_list[n][2] - sv_list[dc - 1][2]) <= condi) {
+      rho_M = sv_list[n][0];
+      rho_N = sv_list[n][1];
+      i = sv_list[n][2];
+
+      for (uint8_t m = 0; m < msize[rho_M][rho_N]; ++m) {
+        sv = sqrt(gsl_vector_get(S[rho_M][rho_N], i) * dim[rho_M] * dim[rho_N] /
+                  sv_max);
+        result[0].Set(i, rho_M, rho_N, rho_A[rho_M][rho_N][m],
+                      rho_B[rho_M][rho_N][m],
+                      sv * gsl_matrix_get(U[rho_M][rho_N], m, i));
+        result[1].Set(i, rho_M, rho_N, rho_A[rho_M][rho_N][m],
+                      rho_B[rho_M][rho_N][m],
+                      sv * gsl_matrix_get(V[rho_M][rho_N], m, i));
+      }
+
+      ++dc_inc;
+      ++n;
+    }
+    dc = dc + dc_inc;
+  }
+
   for (uint8_t rho_M = 0; rho_M < 3; ++rho_M)
     for (uint8_t rho_N = 0; rho_N < 3; ++rho_N) {
       gsl_matrix_free(U[rho_M][rho_N]);
       gsl_vector_free(S[rho_M][rho_N]);
       gsl_matrix_free(V[rho_M][rho_N]);
     }
+
+  return dc;
 }
 
-void DoLoopSVD(DTensor7 result[2], uint8_t sv_len[3][3], DTensor4 *B,
-               const uint8_t dc, const double condi, const uint8_t rho_A[3][5],
-               const uint8_t rho_B[3][5], const uint8_t m_A[][3][3],
-               const uint8_t m_B[][3][3], const uint8_t msize[3][3],
-               const uint8_t ind[3]) {
-  uint8_t sv_list[9*dc][3];
+uint8_t DoLoopSVD(DTensor7 result[2], uint8_t sv_len[3][3], DTensor4 *B,
+                  uint8_t dc, const double condi, const uint8_t rho_A[3][5],
+                  const uint8_t rho_B[3][5], const uint8_t m_A[][3][3],
+                  const uint8_t m_B[][3][3], const uint8_t msize[3][3],
+                  const uint8_t ind[3]) {
+  uint8_t sv_list[18*dc][3];
   uint8_t sv_num = 0;
   gsl_matrix *U[3][3];
   gsl_matrix *V[3][3];
@@ -345,12 +371,44 @@ void DoLoopSVD(DTensor7 result[2], uint8_t sv_len[3][3], DTensor4 *B,
           }
   }
 
+  if (sv_num > dc) {
+    uint8_t dc_inc = 0;
+    uint8_t n = dc;
+    while (fabs(sv_list[n][2] - sv_list[dc - 1][2]) <= condi) {
+      rho_M = sv_list[n][0];
+      rho_N = sv_list[n][1];
+      i = sv_list[n][2];
+      for (uint8_t m = 0; m < ind[rho_M]; ++m)
+        for (uint8_t p = 0; p < ind[rho_N]; ++p)
+          for (uint8_t j = 0; j < sv_len[rho_A[rho_M][m]][rho_A[rho_N][p]] *
+               sv_len[rho_B[rho_M][m]][rho_B[rho_N][p]]; ++j)
+            if (m < msize[rho_M][rho_N]) {
+              sv = sqrt(gsl_vector_get(S[rho_M][rho_N], i) *
+                        dim[rho_M] * dim[rho_N] / sv_max);
+              m_A_val = m_A[j][rho_M][rho_N];
+              m_B_val = m_B[j][rho_M][rho_N];
+              k = CondenseSVInd(rho_A[rho_M][m], rho_A[rho_N][p]);
+              l = CondenseSVInd(rho_B[rho_M][m], rho_B[rho_N][p]);
+              result[0].Set(i, rho_M, rho_N, m_A_val, k, m_B_val, l,
+                            sv * gsl_matrix_get(U[rho_M][rho_N], m, i));
+              result[1].Set(i, rho_M, rho_N, m_A_val, k, m_B_val, l,
+                            sv * gsl_matrix_get(V[rho_M][rho_N], m, i));
+            }
+
+      ++dc_inc;
+      ++n;
+    }
+    dc = dc + dc_inc;
+  }
+
   for (uint8_t rho_M = 0; rho_M < 3; ++rho_M)
     for (uint8_t rho_N = 0; rho_N < 3; ++rho_N) {
       gsl_matrix_free(U[rho_M][rho_N]);
       gsl_vector_free(S[rho_M][rho_N]);
       gsl_matrix_free(V[rho_M][rho_N]);
     }
+
+  return dc;
 }
 
 void DoFirstContraction(DTensor14 *C, const DTensor9 &K, const DTensor5 &SU,
@@ -654,7 +712,7 @@ void OLD_DoLoopContraction(DTensor14 *C, const DTensor9 &K, const DTensor9 &SU,
 }
 
 void TRGS3(const double a, const double b, const double c,
-           const uint8_t dc, const double condi, const unsigned iter,
+           uint8_t dc, const double condi, const unsigned iter,
            const DTensor9 &K, const DTensor14 &KK) {
   std::cout << K << std::endl;
   DTensor4 B1;
@@ -663,7 +721,7 @@ void TRGS3(const double a, const double b, const double c,
   DTensor5 SVD1[2];
   uint8_t sv_len[3][3];
   uint8_t msize[3][3] = {{3, 1, 1}, {1, 3, 1}, {1, 1, 5}};
-  DoFirstSVD(SVD1, sv_len, &B1, dc, condi, msize);
+  dc = DoFirstSVD(SVD1, sv_len, &B1, dc, condi, msize);
   DTensor5 &SU1 = SVD1[0];
   DTensor5 &SV1 = SVD1[1];
   std::cout << SU1 << std::endl;
@@ -684,7 +742,8 @@ void TRGS3(const double a, const double b, const double c,
   //TODO: make loop terminate when fixed point is reached
   for (unsigned i = 1; i < iter; ++i) {
     DTensor7 SVD2[2];
-    DoLoopSVD(SVD2, sv_len, &B2, dc, condi, rho_A, rho_B, m_A, m_B, msize, ind);
+    dc = DoLoopSVD(SVD2, sv_len, &B2, dc, condi, rho_A, rho_B, m_A, m_B, msize,
+                   ind);
     B2.Clear();
     DTensor7 &SU2 = SVD2[0];
     DTensor7 &SV2 = SVD2[1];
@@ -710,5 +769,5 @@ int main(int argc, char **argv) {
   DTensor14 KK;
   Make18j(&KK, K);
 
-  TRGS3(1, 0, 0, 9, 1e-12, 2, K, KK);
+  TRGS3(0, 0, 0, 9, 1e-12, 2, K, KK);
 }
