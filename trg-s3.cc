@@ -42,9 +42,23 @@ void Make9j(DTensor9 *K) {
 
   F(i) F(j) F(k) F(l) F(m) F(n) F(o) F(p) F(q)
     K->Set(i, j, k, l, m, n, o, p, q,
-        K->Get(i, j, k, l, m, n, o, p, q) +
-        PP.Get(ai, aj, aq) * PP.Get(ak, al, aq) * PP.Get(an, am, ai) *
-        PP.Get(ao, an, aj) * PP.Get(ap, ao, ak) * PP.Get(am, ap, al));
+           K->Get(i, j, k, l, m, n, o, p, q) +
+           PP.Get(ai, aj, aq) * PP.Get(ak, al, aq) * PP.Get(an, am, ai) *
+           PP.Get(ao, an, aj) * PP.Get(ap, ao, ak) * PP.Get(am, ap, al));
+}
+
+void Make18j(DTensor14 *KK, const DTensor9 &K) {
+  DTensor18 KKK;
+  Multiply(&KKK, K, K);
+
+#define G(x) \
+  for (uint8_t x = 0; x < 3; ++x)
+
+  G(a) G(b) G(c) G(d) G(e) G(f) G(g) G(h) G(i) G(j) G(k) G(l) G(m) G(n) G(o)
+      G(p) G(q) G(r)
+    KK->Set(a, b, c, d, i, j, k, l, m, r,
+            e + 3 * n, f + 3 * o, g + 3 * p, h + 3 * q,
+            KKK.Get(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r));
 }
 
 void MakeFirstBlocks(DTensor4 *B, const double a, const double b,
@@ -192,6 +206,11 @@ int CompareSVs(const void *a_, const void *b_) {
     return 1;
 }
 
+uint8_t CondenseSVInd(const uint8_t rho_1, const uint8_t rho_2) {
+  uint8_t ind = rho_1 + 3 * rho_2;
+  return ind;
+}
+
 void DoFirstSVD(DTensor5 result[2], uint8_t sv_len[3][3], DTensor4 *B,
                 const uint8_t dc, const double condi,
                 const uint8_t msize[3][3]) {
@@ -260,7 +279,7 @@ void DoFirstSVD(DTensor5 result[2], uint8_t sv_len[3][3], DTensor4 *B,
     }
 }
 
-void DoLoopSVD(DTensor9 result[2], uint8_t sv_len[3][3], DTensor4 *B,
+void DoLoopSVD(DTensor7 result[2], uint8_t sv_len[3][3], DTensor4 *B,
                const uint8_t dc, const double condi, const uint8_t rho_A[3][5],
                const uint8_t rho_B[3][5], const uint8_t m_A[][3][3],
                const uint8_t m_B[][3][3], const uint8_t msize[3][3],
@@ -298,6 +317,8 @@ void DoLoopSVD(DTensor9 result[2], uint8_t sv_len[3][3], DTensor4 *B,
   uint8_t i;
   uint8_t m_A_val;
   uint8_t m_B_val;
+  uint8_t k;
+  uint8_t l;
   double sv;
   double sv_max = gsl_vector_get(S[sv_list[0][0]][sv_list[0][1]],
                                  sv_list[0][2]) *
@@ -309,22 +330,19 @@ void DoLoopSVD(DTensor9 result[2], uint8_t sv_len[3][3], DTensor4 *B,
     for (uint8_t m = 0; m < ind[rho_M]; ++m)
       for (uint8_t p = 0; p < ind[rho_N]; ++p)
         for (uint8_t j = 0; j < sv_len[rho_A[rho_M][m]][rho_A[rho_N][p]] *
-             sv_len[rho_B[rho_M][m]][rho_B[rho_N][p]]; ++j) {
-          m_A_val = m_A[j][rho_M][rho_N];
-          m_B_val = m_B[j][rho_M][rho_N];
-          sv = sqrt(gsl_vector_get(S[rho_M][rho_N], i) *
-                    dim[rho_M] * dim[rho_N] / sv_max);
+             sv_len[rho_B[rho_M][m]][rho_B[rho_N][p]]; ++j)
           if (m < msize[rho_M][rho_N]) {
-            result[0].Set(i, rho_M, rho_N, m_A_val, rho_A[rho_M][m],
-                          rho_A[rho_N][p], m_B_val, rho_B[rho_M][m],
-                          rho_B[rho_N][p],
+            sv = sqrt(gsl_vector_get(S[rho_M][rho_N], i) *
+                      dim[rho_M] * dim[rho_N] / sv_max);
+            m_A_val = m_A[j][rho_M][rho_N];
+            m_B_val = m_B[j][rho_M][rho_N];
+            k = CondenseSVInd(rho_A[rho_M][m], rho_A[rho_N][p]);
+            l = CondenseSVInd(rho_B[rho_M][m], rho_B[rho_N][p]);
+            result[0].Set(i, rho_M, rho_N, m_A_val, k, m_B_val, l,
                           sv * gsl_matrix_get(U[rho_M][rho_N], m, i));
-            result[1].Set(i, rho_M, rho_N, m_A_val, rho_A[rho_M][m],
-                          rho_A[rho_N][p], m_B_val, rho_B[rho_M][m],
-                          rho_B[rho_N][p],
+            result[1].Set(i, rho_M, rho_N, m_A_val, k, m_B_val, l,
                           sv * gsl_matrix_get(V[rho_M][rho_N], m, i));
           }
-        }
   }
 
   for (uint8_t rho_M = 0; rho_M < 3; ++rho_M)
@@ -428,9 +446,75 @@ void DoFirstContraction(DTensor14 *C, const DTensor9 &K, const DTensor5 &SU,
   Rearrange(C, KKSUSUSVSV7, mapping);
 }
 
+void DoLoopContraction(DTensor14 *C, const DTensor14 &KK, const DTensor7 &SU,
+                       const DTensor7 &SV) {
+  DTensor12 SUSU0;
+  Contract2(&SUSU0, SU, 3, SU, 5);
+
+  DTensor11 SUSU;
+  ContractSelf(&SUSU, SUSU0, 3, 11);
+
+  DTensor16 SVSUSU0;
+  Contract2(&SVSUSU0, SV, 3, SUSU, 4);
+
+  DTensor15 SVSUSU;
+  ContractSelf(&SVSUSU, SVSUSU0, 3, 10);
+
+  DTensor20 SVSUSUSV0;
+  Contract2(&SVSUSUSV0, SVSUSU, 4, SV, 3);
+
+  DTensor18 SVSUSUSV1;
+  ContractSelf2(&SVSUSUSV1, SVSUSUSV0, 12, 18);
+
+  DTensor17 SVSUSUSV2;
+  ContractSelf(&SVSUSUSV2, SVSUSUSV1, 4, 16);
+
+  DTensor16 SVSUSUSV;
+  ContractSelf(&SVSUSUSV, SVSUSUSV2, 12, 16);
+
+  DTensor28 C0;
+  Contract2(&C0, KK, 10, SVSUSUSV, 4);
+
+  DTensor26 C1;
+  ContractSelf2(&C1, C0, 10, 16);
+
+  DTensor24 C2;
+  ContractSelf2(&C2, C1, 10, 18);
+
+  DTensor22 C3;
+  ContractSelf2(&C3, C2, 10, 20);
+
+  DTensor21 C4;
+  ContractSelf(&C4, C3, 0, 11);
+
+  DTensor20 C5;
+  ContractSelf(&C5, C4, 1, 13);
+
+  DTensor19 C6;
+  ContractSelf(&C6, C5, 2, 15);
+
+  DTensor18 C7;
+  ContractSelf(&C7, C6, 3, 17);
+
+  DTensor17 C8;
+  ContractSelf(&C8, C7, 5, 11);
+
+  DTensor16 C9;
+  ContractSelf(&C9, C8, 6, 12);
+
+  DTensor15 C10;
+  ContractSelf(&C10, C9, 7, 13);
+
+  DTensor14 C11;
+  ContractSelf(&C11, C10, 8, 14);
+
+  rank_t mapping[14] = {4, 9, 10, 0, 5, 11, 1, 6, 12, 2, 7, 13, 3, 8};
+  Rearrange(C, C11, mapping);
+}
+
 #define V(x) std::cout << #x << std::endl; x
 
-void DoLoopContraction(DTensor14 *C, const DTensor9 &K, const DTensor9 &SU,
+void OLD_DoLoopContraction(DTensor14 *C, const DTensor9 &K, const DTensor9 &SU,
                        const DTensor9 &SV) {
   DTensor16 SUSU;
   // U00, U01, U02, U04, U05, U06, U07, U08, U10, U11, U12, U13, U14,
@@ -571,7 +655,7 @@ void DoLoopContraction(DTensor14 *C, const DTensor9 &K, const DTensor9 &SU,
 
 void TRGS3(const double a, const double b, const double c,
            const uint8_t dc, const double condi, const unsigned iter,
-           const DTensor9 &K) {
+           const DTensor9 &K, const DTensor14 &KK) {
   std::cout << K << std::endl;
   DTensor4 B1;
   MakeFirstBlocks(&B1, a, b, c);
@@ -599,15 +683,15 @@ void TRGS3(const double a, const double b, const double c,
 
   //TODO: make loop terminate when fixed point is reached
   for (unsigned i = 1; i < iter; ++i) {
-    DTensor9 SVD2[2];
+    DTensor7 SVD2[2];
     DoLoopSVD(SVD2, sv_len, &B2, dc, condi, rho_A, rho_B, m_A, m_B, msize, ind);
     B2.Clear();
-    DTensor9 &SU2 = SVD2[0];
-    DTensor9 &SV2 = SVD2[1];
+    DTensor7 &SU2 = SVD2[0];
+    DTensor7 &SV2 = SVD2[1];
     std::cout << SU2 << std::endl;
     std::cout << SV2 << std::endl;
     DTensor14 C2;
-    DoLoopContraction(&C2, K, SU2, SV2);
+    DoLoopContraction(&C2, KK, SU2, SV2);
     std::cout << C2 << std::endl;
     MakeLoopBlocks(&B2, m_A, m_B, &C2, ind, sv_len, rho_A, rho_B, condi, msize);
     std::cout << B2 << std::endl;
@@ -620,8 +704,11 @@ int main(int argc, char **argv) {
   mem_limit.rlim_max = 6500000000;
   setrlimit(RLIMIT_AS, &mem_limit);
 
+  //TODO: save K and KK to file so this bit only needs to be run once?
   DTensor9 K;
   Make9j(&K);
+  DTensor14 KK;
+  Make18j(&KK, K);
 
-  TRGS3(1, 0, 0, 9, 1e-12, 10, K);
+  TRGS3(1, 0, 0, 9, 1e-12, 2, K, KK);
 }
