@@ -8,3 +8,5 @@ trg-s3
 .project
 .pydevproject
 .settings
+/make.log
+/Debug

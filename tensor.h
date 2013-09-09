@@ -36,8 +36,8 @@ public:
   }
 
   Coordinate() {
-    //for (rank_t d = 0; d < rank; ++d)
-    //  coords_[d] = 0xff;
+    for (rank_t d = 0; d < rank; ++d)
+      coords_[d] = 0xff;
   }
 
   bool operator<(const Coordinate &other) const {
